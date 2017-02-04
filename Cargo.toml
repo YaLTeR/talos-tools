@@ -1,0 +1,9 @@
+[package]
+name = "talos-tools"
+version = "0.1.0"
+authors = ["Ivan Molodetskikh <yalterz@gmail.com>"]
+
+[dependencies]
+"lazy_static" = "0.2"
+"libc" = "0.2"
+"x11" = { version = "2.12", features = [ "xlib" ] }

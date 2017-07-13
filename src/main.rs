@@ -9,7 +9,7 @@ use x11::xlib::*;
 struct XlibStuff {
     pub display: *mut Display,
     pub root: Window,
-    _h: ()
+    _h: (),
 }
 
 impl XlibStuff {
@@ -24,10 +24,10 @@ impl XlibStuff {
             let root = XRootWindow(display, screen);
 
             Ok(XlibStuff {
-                display: display,
-                root: root,
-                _h: ()
-            })
+                   display: display,
+                   root: root,
+                   _h: (),
+               })
         }
     }
 
@@ -78,10 +78,12 @@ impl XlibStuff {
                           &mut root_return,
                           &mut parent_return,
                           &mut children,
-                          &mut children_count) != 0 {
+                          &mut children_count) != 0
+            {
                 for i in 0..children_count {
-                    if let Some(window) = self.get_window_by_name(name,
-                                                                  *children.offset(i as isize)) {
+                    if let Some(window) =
+                        self.get_window_by_name(name, *children.offset(i as isize))
+                    {
                         XFree(children as *mut std::os::raw::c_void);
 
                         return Some(window);
@@ -117,8 +119,9 @@ fn run_event_loop(x: &XlibStuff) {
 
                     match ev.get_type() {
                         t if t == KeyPress => {
-                            if XKeyEvent::from(ev).keycode == XKeysymToKeycode(x.display,
-                                                                               keysym::XK_Escape as u64) as u32 {
+                            if XKeyEvent::from(ev).keycode ==
+                                XKeysymToKeycode(x.display, keysym::XK_Escape as u64) as u32
+                            {
                                 if x.warp_cursor_to_center(talos_window).is_err() {
                                     break;
                                 }

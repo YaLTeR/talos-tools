@@ -35,6 +35,10 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
             Regex::new(r"Stopping simulation \(duration: [\d.]+\)\.").unwrap();
         static ref PLAYER_PROFILE_SAVED: Regex =
             Regex::new(r"Player profile saved").unwrap();
+        static ref PUZZLE_SOLVED: Regex =
+            Regex::new(r#"Puzzle "[^"]+" solved"#).unwrap();
+        static ref USER: Regex =
+            Regex::new(r"USER: ").unwrap();
     }
 
     if let Some(caps) = STARTED_LOADING_WORLD.captures(line) {
@@ -44,6 +48,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
         if timer.current_phase() == TimerPhase::Running {
             timer.pause_game_time();
 
+            // Splitting on exiting worlds.
             if state.current_world.as_ref().unwrap() != world_name {
                 timer.split();
             }
@@ -70,10 +75,24 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
                 }
             }
         }
+    } else if PUZZLE_SOLVED.is_match(line) {
+        // Splitting on tetromino puzzles.
+        let mut timer = timer.write();
+        if timer.current_phase() == TimerPhase::Running {
+            timer.split();
+        }
     } else if STOPPING_SIMULATION.is_match(line) {
         // Handle autoreset.
         timer.write().reset(true);
         state.current_world = None;
+    } else if let Some(current_world) = state.current_world.as_ref() {
+        // Handle autostop.
+        if current_world == "Content/Talos/Levels/Islands_03.wld" && USER.is_match(line) {
+            let mut timer = timer.write();
+            if timer.current_phase() == TimerPhase::Running {
+                timer.split();
+            }
+        }
     }
 }
 

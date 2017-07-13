@@ -1,4 +1,6 @@
 use std::{env, thread};
+use std::borrow::Cow;
+use std::cmp::max;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::channel;
@@ -39,6 +41,8 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
             Regex::new(r#"Puzzle "[^"]+" solved"#).unwrap();
         static ref USER: Regex =
             Regex::new(r"USER: ").unwrap();
+        static ref PICKED: Regex =
+            Regex::new(r"Picked: ").unwrap();
     }
 
     if let Some(caps) = STARTED_LOADING_WORLD.captures(line) {
@@ -48,9 +52,11 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
         if timer.current_phase() == TimerPhase::Running {
             timer.pause_game_time();
 
-            // Splitting on exiting worlds.
+            // Splitting on returning to Nexus.
             if state.current_world.as_ref().unwrap() != world_name {
-                timer.split();
+                if world_name == "Content/Talos/Levels/Nexus.wld" {
+                    timer.split();
+                }
             }
         }
 
@@ -74,6 +80,12 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
                     timer.split();
                 }
             }
+        }
+    } else if PICKED.is_match(line) {
+        // Splitting on tetromino and star pickups.
+        let mut timer = timer.write();
+        if timer.current_phase() == TimerPhase::Running {
+            timer.split();
         }
     } else if PUZZLE_SOLVED.is_match(line) {
         // Splitting on tetromino puzzles.
@@ -164,6 +176,33 @@ fn init_curses_colors() {
     pancurses::init_pair(Color::PersonalBest as i16, pancurses::COLOR_BLUE, -1);
 }
 
+fn truncate_string(string: &str, length: usize) -> Cow<str> {
+    if length < 4 {
+        panic!("length must be >= 4");
+    }
+
+    if string.len() <= length {
+        Cow::Borrowed(string)
+    } else {
+        Cow::Owned(format!("{:.1$}...", string, length - 3))
+    }
+}
+
+fn print_split(window: &pancurses::Window, split: &component::splits::SplitState) {
+    const TIME_WIDTH: usize = 6;
+    let width = max(window.get_max_x() as usize, TIME_WIDTH + 4);
+    let split_name_width = width - TIME_WIDTH * 2 - 2;
+
+    let split_name_truncated = truncate_string(&split.name, split_name_width);
+    window.printw(&format!("{:1$.1$} ", split_name_truncated, split_name_width));
+
+    window.color_set(split.color as i16);
+    window.printw(&format!("{:>1$.1$} ", split.delta, TIME_WIDTH));
+
+    window.color_set(Color::Default as i16);
+    window.printw(&format!("{:>1$.1$}", split.time, TIME_WIDTH));
+}
+
 pub fn run() -> Result<()> {
     let timer = create_timer()?.into_shared();
     {
@@ -178,19 +217,46 @@ pub fn run() -> Result<()> {
     init_curses_colors();
 
     let timer_component = component::timer::Component::new();
+    let mut splits_component = component::splits::Component::new();
+    {
+        let mut settings = splits_component.settings_mut();
+        settings.always_show_last_split = true;
+        settings.separator_last_split = true;
+        settings.split_preview_count = 1;
+        settings.visual_split_count = 10;
+    }
 
     loop {
-        if let Some(_) = window.getch() {
+        if let Some(pancurses::Input::Character(_)) = window.getch() {
             break;
         }
 
-        let state = timer_component.state(&timer.read());
+        splits_component.settings_mut().visual_split_count =
+            max(window.get_max_y() as usize, 3) - 2;
 
-        let y = window.get_cur_y();
-        window.mv(y, 0);
-        window.deleteln();
-        window.color_set(state.color as i16);
-        window.printw(&format!("{}{}", state.time, state.fraction));
+        let timer = timer.read();
+        let timer_state = timer_component.state(&timer);
+        let splits_state = splits_component.state(&timer);
+        drop(timer);
+
+        // Clear the contents.
+        window.clear();
+        window.mv(0, 0);
+
+        // Draw the splits.
+        let width = window.get_max_x() as usize;
+        for split in &splits_state.splits[0..splits_state.splits.len() - 1] {
+            print_split(&window, split);
+        }
+        window.printw(&format!("{:-<1$}", "", width));
+        print_split(&window, &splits_state.splits[splits_state.splits.len() - 1]);
+
+        // Draw the timer.
+        window.color_set(timer_state.color as i16);
+        window.printw(&format!("{:^1$.1$}",
+                               &format!("{}{}", timer_state.time, timer_state.fraction),
+                               width));
+
         window.color_set(Color::Default as i16);
         window.refresh();
 

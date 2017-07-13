@@ -1,10 +1,11 @@
+use std::{env, thread};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::channel;
-use std::thread;
 use std::time::Duration;
 
-use livesplit_core::{Run, Segment, SharedTimer, Timer, TimingMethod};
+use errors::*;
+use livesplit_core::{SharedTimer, Timer, TimingMethod, parser};
 use livesplit_core::time_formatter::{self, Accuracy, TimeFormatter};
 use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses::{endwin, initscr};
@@ -67,20 +68,23 @@ fn watch_log(timer: SharedTimer) {
     }
 }
 
-fn create_timer() -> Timer {
-    let mut run = Run::new();
-    run.set_game_name("The Talos Principle");
-    run.set_category_name("Any% (60 FPS)");
-    run.push_segment(Segment::new("The only split"));
+fn create_timer() -> Result<Timer> {
+    let splits_filename = env::args()
+        .nth(1)
+        .ok_or("the splits filename argument is missing")?;
+    let splits = File::open(splits_filename)
+        .chain_err(|| "could not open the splits file")?;
+    let run = parser::livesplit::parse(splits, None)
+        .chain_err(|| "could not parse the splits file")?;
 
     let mut timer = Timer::new(run);
     timer.set_current_timing_method(TimingMethod::GameTime);
 
-    timer
+    Ok(timer)
 }
 
-pub fn run() {
-    let timer = create_timer().into_shared();
+pub fn run() -> Result<()> {
+    let timer = create_timer()?.into_shared();
     {
         let timer = timer.clone();
         thread::spawn(move || watch_log(timer));
@@ -110,4 +114,6 @@ pub fn run() {
     }
 
     endwin();
+
+    Ok(())
 }

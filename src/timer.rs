@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use errors::*;
 use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, TimingMethod, component,
-                     parser};
+                     parser, saver};
 use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses;
 use regex::Regex;
@@ -95,7 +95,14 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
         }
     } else if STOPPING_SIMULATION.is_match(line) {
         // Handle autoreset.
-        timer.write().reset(true);
+        let mut timer = timer.write();
+        timer.reset(true);
+
+        // Save the splits.
+        saver::livesplit::save(timer.run(),
+                               File::create(env::args().nth(1).unwrap()).unwrap())
+        .unwrap();
+
         state.current_world = None;
     } else if let Some(current_world) = state.current_world.as_ref() {
         // Handle autostop.

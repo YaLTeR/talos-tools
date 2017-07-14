@@ -1,7 +1,7 @@
 use std::{env, thread};
 use std::borrow::Cow;
 use std::cmp::max;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -116,7 +116,13 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
 }
 
 fn watch_log(timer: SharedTimer) {
-    let log = File::open(LOG_FILE).unwrap();
+    let log = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(LOG_FILE)
+        .unwrap();
     let mut log = BufReader::new(log);
     let mut line = String::new();
     {
@@ -223,6 +229,7 @@ pub fn run() -> Result<()> {
     pancurses::use_default_colors();
     init_curses_colors();
 
+    let mut title_component = component::title::Component::new();
     let timer_component = component::timer::Component::new();
     let mut splits_component = component::splits::Component::new();
     {
@@ -230,7 +237,6 @@ pub fn run() -> Result<()> {
         settings.always_show_last_split = true;
         settings.separator_last_split = true;
         settings.split_preview_count = 1;
-        settings.visual_split_count = 10;
     }
 
     loop {
@@ -239,19 +245,28 @@ pub fn run() -> Result<()> {
         }
 
         splits_component.settings_mut().visual_split_count =
-            max(window.get_max_y() as usize, 3) - 2;
+            max(window.get_max_y() as usize, 5) - 4;
 
         let timer = timer.read();
+        let title_state = title_component.state(&timer);
         let timer_state = timer_component.state(&timer);
         let splits_state = splits_component.state(&timer);
         drop(timer);
+
+        let width = window.get_max_x() as usize;
 
         // Clear the contents.
         window.clear();
         window.mv(0, 0);
 
+        // Draw the title.
+        window.printw(&format!("{:^1$.1$}", title_state.game, width));
+        window.printw(&format!("{:^1$.1$}", title_state.category, width));
+        let attempts = format!("{}", title_state.attempts);
+        window.mv(1, (width - attempts.len()) as i32);
+        window.printw(&attempts);
+
         // Draw the splits.
-        let width = window.get_max_x() as usize;
         for split in &splits_state.splits[0..splits_state.splits.len() - 1] {
             print_split(&window, split);
         }

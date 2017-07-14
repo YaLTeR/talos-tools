@@ -225,6 +225,7 @@ pub fn run() -> Result<()> {
 
     let window = pancurses::initscr();
     window.nodelay(true);
+    pancurses::curs_set(0);
     pancurses::start_color();
     pancurses::use_default_colors();
     init_curses_colors();

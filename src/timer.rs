@@ -9,6 +9,7 @@ use std::time::Duration;
 use errors::*;
 use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, TimingMethod, component,
                      parser, saver};
+use livesplit_core::time_formatter::DASH;
 use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses;
 use regex::Regex;
@@ -274,12 +275,41 @@ fn draw_timer(window: &pancurses::Window, width: usize, timer_state: component::
                            width));
 }
 
+fn draw_prev_segment(window: &pancurses::Window, width: usize, prev_seg_state: component::previous_segment::State) {
+    let y = window.get_cur_y();
+
+    window.color_set(Color::Default as i16);
+    window.printw(&prev_seg_state.text);
+
+    window.color_set(prev_seg_state.color as i16);
+
+    if prev_seg_state.time == DASH {
+        // Special handling for the unicode dash.
+        window.mv(y, (width - 1) as i32);
+        window.printw(&prev_seg_state.time);
+    } else {
+        window.mv(y, (width - prev_seg_state.time.len()) as i32);
+        window.printw(&prev_seg_state.time);
+    }
+}
+
+fn draw_sum_of_best(window: &pancurses::Window, width: usize, sob_state: component::sum_of_best::State) {
+    let y = window.get_cur_y();
+
+    window.color_set(Color::Default as i16);
+    window.printw("Sum of Best");
+    window.mv(y, (width - sob_state.time.len()) as i32);
+    window.printw(&sob_state.time);
+}
+
 fn main_loop(timer: SharedTimer,
              window: &pancurses::Window,
              watch_to_main_rx: Receiver<Error>)
              -> Result<()> {
     let mut title_component = component::title::Component::new();
     let timer_component = component::timer::Component::new();
+    let sob_component = component::sum_of_best::Component::new();
+    let prev_seg_component = component::previous_segment::Component::new();
     let mut splits_component = component::splits::Component::new();
     {
         let mut settings = splits_component.settings_mut();
@@ -309,12 +339,14 @@ fn main_loop(timer: SharedTimer,
         }
 
         splits_component.settings_mut().visual_split_count =
-            max(window.get_max_y() as usize, 5) - 4;
+            max(window.get_max_y() as usize, 7) - 6;
 
         let timer = timer.read();
         let title_state = title_component.state(&timer);
         let timer_state = timer_component.state(&timer);
         let splits_state = splits_component.state(&timer);
+        let sob_state = sob_component.state(&timer);
+        let prev_seg_state = prev_seg_component.state(&timer);
         drop(timer);
 
         let width = window.get_max_x() as usize;
@@ -331,6 +363,12 @@ fn main_loop(timer: SharedTimer,
 
         // Draw the timer.
         draw_timer(&window, width, timer_state);
+
+        // Draw previous segment.
+        draw_prev_segment(&window, width, prev_seg_state);
+
+        // Draw sum of best.
+        draw_sum_of_best(&window, width, sob_state);
 
         window.refresh();
 

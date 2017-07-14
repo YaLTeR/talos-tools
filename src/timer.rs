@@ -94,6 +94,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
                 let mut timer = timer.write();
                 if timer.current_phase() == TimerPhase::NotRunning {
                     timer.split();
+                    timer.initialize_game_time();
                 }
             }
         }

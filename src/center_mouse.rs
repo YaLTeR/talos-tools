@@ -121,7 +121,7 @@ fn run_event_loop(x: &XlibStuff) {
                             if XKeyEvent::from(ev).keycode ==
                                 XKeysymToKeycode(x.display, keysym::XK_Escape as u64) as u32
                             {
-                                if x.warp_cursor_to_center(talos_window).is_err() {
+                                if let Err(_) = x.warp_cursor_to_center(talos_window) {
                                     break;
                                 }
                             }

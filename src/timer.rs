@@ -257,13 +257,13 @@ fn draw_split(window: &pancurses::Window, width: usize, split: &component::split
 
 fn draw_splits(window: &pancurses::Window, width: usize, splits_state: component::splits::State) {
     for split in &splits_state.splits[0..splits_state.splits.len() - 1] {
-        draw_split(&window, width, split);
+        draw_split(window, width, split);
     }
 
     window.color_set(Color::Default as i16);
     window.printw(&format!("{:-<1$}", "", width));
 
-    draw_split(&window,
+    draw_split(window,
                width,
                &splits_state.splits[splits_state.splits.len() - 1]);
 }
@@ -352,19 +352,19 @@ fn main_loop(timer: SharedTimer,
         window.mv(0, 0);
 
         // Draw the title.
-        draw_title(&window, width, title_state);
+        draw_title(window, width, title_state);
 
         // Draw the splits.
-        draw_splits(&window, width, splits_state);
+        draw_splits(window, width, splits_state);
 
         // Draw the timer.
-        draw_timer(&window, width, timer_state);
+        draw_timer(window, width, timer_state);
 
         // Draw previous segment.
-        draw_prev_segment(&window, width, prev_seg_state);
+        draw_prev_segment(window, width, prev_seg_state);
 
         // Draw sum of best.
-        draw_sum_of_best(&window, width, sob_state);
+        draw_sum_of_best(window, width, sob_state);
 
         window.refresh();
 

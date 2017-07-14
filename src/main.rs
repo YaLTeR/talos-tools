@@ -26,10 +26,13 @@ fn usage() {
 }
 
 fn main() {
-    thread::spawn(center_mouse::run);
+    let center_mouse_thread = thread::spawn(center_mouse::run);
 
     if let Err(ref e) = timer::run() {
         println!("{}", e.display());
         usage();
+
+        println!("\nContinuing in center mouse mode.");
+        center_mouse_thread.join().unwrap();
     }
 }

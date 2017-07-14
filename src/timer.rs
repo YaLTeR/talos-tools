@@ -30,6 +30,19 @@ impl GameState {
     }
 }
 
+fn save_splits(timer: &Timer) -> Result<()> {
+    let splits_filename = env::args()
+        .nth(ArgumentPosition::SplitsFilename as usize)
+        .ok_or("the splits filename argument is missing")?;
+
+    saver::livesplit::save(timer.run(),
+                           File::create(splits_filename)
+                               .chain_err(|| "could not open the splits file for writing")?)
+    .chain_err(|| "could not save the splits")?;
+
+    Ok(())
+}
+
 fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Result<()> {
     lazy_static! {
         static ref STARTED_LOADING_WORLD: Regex =
@@ -102,13 +115,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         timer.reset(true);
 
         // Save the splits.
-        let splits_filename = env::args()
-            .nth(ArgumentPosition::SplitsFilename as usize)
-            .ok_or("the splits filename argument is missing")?;
-        saver::livesplit::save(timer.run(),
-                               File::create(splits_filename)
-                                   .chain_err(|| "could not open the splits file for writing")?)
-        .chain_err(|| "could not save the splits")?;
+        save_splits(&timer)?;
 
         state.current_world = None;
     } else if let Some(current_world) = state.current_world.as_ref() {
@@ -288,8 +295,17 @@ fn main_loop(timer: SharedTimer,
             Err(TryRecvError::Empty) => {}
         }
 
-        if let Some(pancurses::Input::Character(_)) = window.getch() {
-            break;
+        if let Some(input) = window.getch() {
+            match input {
+                pancurses::Input::KeyResize => {}
+                pancurses::Input::KeyDC => {
+                    // Delete key: reset without saving golds.
+                    let mut timer = timer.write();
+                    timer.reset(false);
+                    save_splits(&timer)?;
+                }
+                _ => break,
+            }
         }
 
         splits_component.settings_mut().visual_split_count =
@@ -335,6 +351,7 @@ pub fn run() -> Result<()> {
 
     let window = pancurses::initscr();
     window.nodelay(true);
+    window.keypad(true);
     pancurses::curs_set(0);
     pancurses::start_color();
     pancurses::use_default_colors();

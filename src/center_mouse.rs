@@ -57,7 +57,7 @@ impl XlibStuff {
 
             if XFetchName(self.display, current, &mut window_name) != 0 {
                 if let Ok(window_name_str) = CStr::from_ptr(window_name).to_str() {
-                    if window_name_str.starts_with("Talos - Linux") {
+                    if window_name_str.starts_with(name) {
                         XFree(window_name as *mut std::os::raw::c_void);
 
                         return Some(current);

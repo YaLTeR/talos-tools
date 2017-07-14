@@ -45,7 +45,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         static ref USER: Regex =
             Regex::new(r"USER: ").unwrap();
         static ref PICKED: Regex =
-            Regex::new(r"Picked: ").unwrap();
+            Regex::new(r"Backup and Save Talos Progress: tetromino \([^)]+\) picked").unwrap();
     }
 
     if let Some(caps) = STARTED_LOADING_WORLD.captures(line) {

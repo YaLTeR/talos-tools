@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use std::cmp::max;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::Duration;
 
 use errors::*;
@@ -13,7 +13,10 @@ use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses;
 use regex::Regex;
 
-const LOG_FILE: &str = "/mnt/hdd/Games/SteamLibraryLinux/steamapps/common/The Talos Principle/Log/Talos.log";
+enum ArgumentPosition {
+    TalosLogFilename = 1,
+    SplitsFilename = 2,
+}
 
 struct GameState {
     current_world: Option<String>,
@@ -27,7 +30,7 @@ impl GameState {
     }
 }
 
-fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
+fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Result<()> {
     lazy_static! {
         static ref STARTED_LOADING_WORLD: Regex =
             Regex::new(r#"Started loading world "([^"]+)""#).unwrap();
@@ -99,9 +102,13 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
         timer.reset(true);
 
         // Save the splits.
+        let splits_filename = env::args()
+            .nth(ArgumentPosition::SplitsFilename as usize)
+            .ok_or("the splits filename argument is missing")?;
         saver::livesplit::save(timer.run(),
-                               File::create(env::args().nth(1).unwrap()).unwrap())
-        .unwrap();
+                               File::create(splits_filename)
+                                   .chain_err(|| "could not open the splits file for writing")?)
+        .chain_err(|| "could not save the splits")?;
 
         state.current_world = None;
     } else if let Some(current_world) = state.current_world.as_ref() {
@@ -113,27 +120,34 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) {
             }
         }
     }
+
+    Ok(())
 }
 
-fn watch_log(timer: SharedTimer) {
+fn watch_log(timer: SharedTimer) -> Result<()> {
+    let log_filename = env::args()
+        .nth(ArgumentPosition::TalosLogFilename as usize)
+        .ok_or("the log filename argument is missing")?;
     let log = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(true)
-        .open(LOG_FILE)
-        .unwrap();
+        .open(&log_filename)
+        .chain_err(|| "could not open the Talos log file")?;
     let mut log = BufReader::new(log);
     let mut line = String::new();
     {
         let mut temp = Vec::new();
-        log.read_to_end(&mut temp).unwrap();
+        log.read_to_end(&mut temp)
+           .chain_err(|| "error reading the Talos log file")?;
     }
 
     let (tx, rx) = channel();
-    let mut watcher = raw_watcher(tx).unwrap();
-    watcher.watch(LOG_FILE, RecursiveMode::NonRecursive)
-           .unwrap();
+    let mut watcher = raw_watcher(tx)
+        .chain_err(|| "could not create a filesystem watcher")?;
+    watcher.watch(&log_filename, RecursiveMode::NonRecursive)
+           .chain_err(|| "could not set up the filesystem watcher on the Talos log file")?;
 
     // TODO: perhaps update the state from the existing log?
     let mut state = GameState::new();
@@ -147,12 +161,13 @@ fn watch_log(timer: SharedTimer) {
 
                 loop {
                     line.clear();
-                    let length = log.read_line(&mut line).unwrap();
+                    let length = log.read_line(&mut line)
+                                    .chain_err(|| "error reading the Talos log file")?;
                     if length == 0 {
                         break;
                     }
 
-                    process_line(&timer, &mut state, &line);
+                    process_line(&timer, &mut state, &line)?;
                 }
             }
             _ => {
@@ -162,9 +177,15 @@ fn watch_log(timer: SharedTimer) {
     }
 }
 
+fn watch_log_thread(watch_to_main_tx: Sender<Error>, timer: SharedTimer) {
+    if let Err(e) = watch_log(timer) {
+        watch_to_main_tx.send(e).unwrap();
+    }
+}
+
 fn create_timer() -> Result<Timer> {
     let splits_filename = env::args()
-        .nth(1)
+        .nth(ArgumentPosition::SplitsFilename as usize)
         .ok_or("the splits filename argument is missing")?;
     let splits = File::open(splits_filename)
         .chain_err(|| "could not open the splits file")?;
@@ -201,12 +222,22 @@ fn truncate_string(string: &str, length: usize) -> Cow<str> {
     }
 }
 
-fn print_split(window: &pancurses::Window, split: &component::splits::SplitState) {
+fn draw_title(window: &pancurses::Window, width: usize, title_state: component::title::State) {
+    window.color_set(Color::Default as i16);
+    window.printw(&format!("{:^1$.1$}", title_state.game, width));
+    window.printw(&format!("{:^1$.1$}", title_state.category, width));
+    let attempts = format!("{}", title_state.attempts);
+    window.mv(1, (width - attempts.len()) as i32);
+    window.printw(&attempts);
+}
+
+fn draw_split(window: &pancurses::Window, width: usize, split: &component::splits::SplitState) {
     const TIME_WIDTH: usize = 6;
-    let width = max(window.get_max_x() as usize, TIME_WIDTH + 4);
+    let width = max(width, TIME_WIDTH + 4);
     let split_name_width = width - TIME_WIDTH * 2 - 2;
 
     let split_name_truncated = truncate_string(&split.name, split_name_width);
+    window.color_set(Color::Default as i16);
     window.printw(&format!("{:1$.1$} ", split_name_truncated, split_name_width));
 
     window.color_set(split.color as i16);
@@ -216,20 +247,30 @@ fn print_split(window: &pancurses::Window, split: &component::splits::SplitState
     window.printw(&format!("{:>1$.1$}", split.time, TIME_WIDTH));
 }
 
-pub fn run() -> Result<()> {
-    let timer = create_timer()?.into_shared();
-    {
-        let timer = timer.clone();
-        thread::spawn(move || watch_log(timer));
+fn draw_splits(window: &pancurses::Window, width: usize, splits_state: component::splits::State) {
+    for split in &splits_state.splits[0..splits_state.splits.len() - 1] {
+        draw_split(&window, width, split);
     }
 
-    let window = pancurses::initscr();
-    window.nodelay(true);
-    pancurses::curs_set(0);
-    pancurses::start_color();
-    pancurses::use_default_colors();
-    init_curses_colors();
+    window.color_set(Color::Default as i16);
+    window.printw(&format!("{:-<1$}", "", width));
 
+    draw_split(&window,
+               width,
+               &splits_state.splits[splits_state.splits.len() - 1]);
+}
+
+fn draw_timer(window: &pancurses::Window, width: usize, timer_state: component::timer::State) {
+    window.color_set(timer_state.color as i16);
+    window.printw(&format!("{:^1$.1$}",
+                           &format!("{}{}", timer_state.time, timer_state.fraction),
+                           width));
+}
+
+fn main_loop(timer: SharedTimer,
+             window: &pancurses::Window,
+             watch_to_main_rx: Receiver<Error>)
+             -> Result<()> {
     let mut title_component = component::title::Component::new();
     let timer_component = component::timer::Component::new();
     let mut splits_component = component::splits::Component::new();
@@ -241,6 +282,12 @@ pub fn run() -> Result<()> {
     }
 
     loop {
+        match watch_to_main_rx.try_recv() {
+            Ok(e) => return Err(e),
+            Err(TryRecvError::Disconnected) => panic!("watch thread channel disconnected"),
+            Err(TryRecvError::Empty) => {}
+        }
+
         if let Some(pancurses::Input::Character(_)) = window.getch() {
             break;
         }
@@ -261,32 +308,41 @@ pub fn run() -> Result<()> {
         window.mv(0, 0);
 
         // Draw the title.
-        window.printw(&format!("{:^1$.1$}", title_state.game, width));
-        window.printw(&format!("{:^1$.1$}", title_state.category, width));
-        let attempts = format!("{}", title_state.attempts);
-        window.mv(1, (width - attempts.len()) as i32);
-        window.printw(&attempts);
+        draw_title(&window, width, title_state);
 
         // Draw the splits.
-        for split in &splits_state.splits[0..splits_state.splits.len() - 1] {
-            print_split(&window, split);
-        }
-        window.printw(&format!("{:-<1$}", "", width));
-        print_split(&window, &splits_state.splits[splits_state.splits.len() - 1]);
+        draw_splits(&window, width, splits_state);
 
         // Draw the timer.
-        window.color_set(timer_state.color as i16);
-        window.printw(&format!("{:^1$.1$}",
-                               &format!("{}{}", timer_state.time, timer_state.fraction),
-                               width));
+        draw_timer(&window, width, timer_state);
 
-        window.color_set(Color::Default as i16);
         window.refresh();
 
         thread::sleep(Duration::from_millis(10));
     }
 
+    Ok(())
+}
+
+pub fn run() -> Result<()> {
+    let (watch_to_main_tx, watch_to_main_rx) = channel();
+
+    let timer = create_timer()?.into_shared();
+    {
+        let timer = timer.clone();
+        thread::spawn(move || watch_log_thread(watch_to_main_tx, timer));
+    }
+
+    let window = pancurses::initscr();
+    window.nodelay(true);
+    pancurses::curs_set(0);
+    pancurses::start_color();
+    pancurses::use_default_colors();
+    init_curses_colors();
+
+    let result = main_loop(timer, &window, watch_to_main_rx);
+
     pancurses::endwin();
 
-    Ok(())
+    result
 }

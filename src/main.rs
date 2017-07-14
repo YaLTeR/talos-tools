@@ -21,7 +21,7 @@ mod center_mouse;
 mod timer;
 
 fn usage() {
-    println!("Usage: {} <path to splits.lss>",
+    println!("Usage: {} <path/to/Talos.log> <path/to/splits.lss>",
              env::args().nth(0).unwrap());
 }
 

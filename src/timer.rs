@@ -1,6 +1,6 @@
 use std::{env, thread};
 use std::borrow::Cow;
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -9,7 +9,6 @@ use std::time::Duration;
 use errors::*;
 use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, TimingMethod, component,
                      parser, saver};
-use livesplit_core::time_formatter::DASH;
 use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses;
 use regex::Regex;
@@ -275,25 +274,21 @@ fn draw_timer(window: &pancurses::Window, width: usize, timer_state: component::
                            width));
 }
 
-fn draw_prev_segment(window: &pancurses::Window, width: usize, prev_seg_state: component::previous_segment::State) {
-    let y = window.get_cur_y();
-
+fn draw_prev_segment(window: &pancurses::Window,
+                     width: usize,
+                     prev_seg_state: component::previous_segment::State) {
     window.color_set(Color::Default as i16);
     window.printw(&prev_seg_state.text);
 
     window.color_set(prev_seg_state.color as i16);
-
-    if prev_seg_state.time == DASH {
-        // Special handling for the unicode dash.
-        window.mv(y, (width - 1) as i32);
-        window.printw(&prev_seg_state.time);
-    } else {
-        window.mv(y, (width - prev_seg_state.time.len()) as i32);
-        window.printw(&prev_seg_state.time);
-    }
+    window.printw(&format!("{:>1$.1$}",
+                           &prev_seg_state.time,
+                           width - min(width, window.get_cur_x() as usize)));
 }
 
-fn draw_sum_of_best(window: &pancurses::Window, width: usize, sob_state: component::sum_of_best::State) {
+fn draw_sum_of_best(window: &pancurses::Window,
+                    width: usize,
+                    sob_state: component::sum_of_best::State) {
     let y = window.get_cur_y();
 
     window.color_set(Color::Default as i16);

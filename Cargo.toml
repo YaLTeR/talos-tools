@@ -11,4 +11,6 @@ livesplit-core = "0.6"
 notify = "4"
 pancurses = "0.8"
 regex = "0.2"
+
+[target.'cfg(unix)'.dependencies]
 x11 = { version = "2.14", features = [ "xlib" ] }

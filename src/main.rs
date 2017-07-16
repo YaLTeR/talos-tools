@@ -8,7 +8,7 @@ extern crate notify;
 extern crate pancurses;
 extern crate regex;
 
-#[cfg(unix)]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 extern crate x11;
 
 use std::env;
@@ -19,7 +19,7 @@ mod errors {
     error_chain!{}
 }
 
-#[cfg(unix)]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 mod center_mouse;
 mod timer;
 
@@ -28,7 +28,7 @@ fn usage() {
              env::args().nth(0).unwrap());
 }
 
-#[cfg(unix)]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn main() {
     use std::thread;
 
@@ -43,7 +43,7 @@ fn main() {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(all(not(windows), not(target_os = "macos"))))]
 fn main() {
     if let Err(ref e) = timer::run() {
         println!("{}", e.display());

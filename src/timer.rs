@@ -45,60 +45,38 @@ fn save_splits(timer: &Timer) -> Result<()> {
 
 fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Result<()> {
     lazy_static! {
-        static ref STARTED_LOADING_WORLD: Regex =
-            Regex::new(r#"Started loading world "([^"]+)""#).unwrap();
-        static ref STARTED_SIMULATION: Regex =
-            Regex::new(r"Started simulation on '([^']+)' in ([\d.]+) seconds\.").unwrap();
-        static ref STOPPING_SIMULATION: Regex =
-            Regex::new(r"Stopping simulation \(duration: [\d.]+\)\.").unwrap();
-        static ref PLAYER_PROFILE_SAVED: Regex =
-            Regex::new(r"Player profile saved").unwrap();
+        static ref CHANGING_OVER_TO: Regex =
+            Regex::new(r"Changing over to (.+)").unwrap();
         static ref PUZZLE_SOLVED: Regex =
             Regex::new(r#"Puzzle "[^"]+" solved"#).unwrap();
-        static ref USER: Regex =
-            Regex::new(r"USER: ").unwrap();
-        static ref PICKED: Regex =
-            Regex::new(r"Picked: ").unwrap();
     }
 
-    if let Some(caps) = STARTED_LOADING_WORLD.captures(line) {
-        let world_name = caps.get(1).unwrap().as_str();
-
+    if line.contains("Changing to") || line.contains("Stopping world") {
+        // Game time pausing.
         let mut timer = timer.write();
         if timer.current_phase() == TimerPhase::Running {
             timer.pause_game_time();
-
-            // Splitting on returning to Nexus.
-            if state.current_world.as_ref().unwrap() != world_name {
-                if world_name == "Content/Talos/Levels/Nexus.wld" {
+        }
+    } else if line.contains("Player profile saved") || line.contains("Starting Talos simulation") {
+        // Game time unpausing.
+        let mut timer = timer.write();
+        if timer.current_phase() == TimerPhase::Running {
+            timer.unpause_game_time();
+        }
+    } else if let Some(caps) = CHANGING_OVER_TO.captures(line) {
+        // Splitting on returning to Nexus.
+        let world_name = caps.get(1).unwrap().as_str();
+        if world_name == "Content/Talos/Levels/Nexus.wld" {
+            let mut timer = timer.write();
+            if timer.current_phase() == TimerPhase::Running {
+                if state.current_world.as_ref().unwrap() != world_name {
                     timer.split();
                 }
             }
         }
 
         state.current_world = Some(world_name.to_string());
-    } else if let Some(caps) = STARTED_SIMULATION.captures(line) {
-        let load_time = caps.get(2).unwrap().as_str().parse::<f64>().unwrap();
-
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running {
-            // Unpause the game time and update the loading times with the precise value.
-            let loading_times = timer.loading_times();
-            timer.unpause_game_time();
-            timer.set_loading_times(loading_times + TimeSpan::from_seconds(load_time));
-        }
-    } else if PLAYER_PROFILE_SAVED.is_match(line) {
-        // Handle autostart.
-        if let Some(current_world) = state.current_world.as_ref() {
-            if current_world == "Content/Talos/Levels/Cloud_1_01.wld" {
-                let mut timer = timer.write();
-                if timer.current_phase() == TimerPhase::NotRunning {
-                    timer.split();
-                    timer.initialize_game_time();
-                }
-            }
-        }
-    } else if PICKED.is_match(line) {
+    } else if line.contains("Picked:") {
         // Splitting on tetromino and star pickups.
         let mut timer = timer.write();
         if timer.current_phase() == TimerPhase::Running {
@@ -110,18 +88,37 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         if timer.current_phase() == TimerPhase::Running {
             timer.split();
         }
-    } else if STOPPING_SIMULATION.is_match(line) {
-        // Handle autoreset.
+    } else if line.contains("Started simulation on 'Content/Talos/Levels/Cloud_1_01.wld'") {
+        // Starting the timer.
+        let mut timer = timer.write();
+        if timer.current_phase() == TimerPhase::NotRunning {
+            timer.split();
+            timer.initialize_game_time();
+            timer.pause_game_time();
+            timer.set_game_time(TimeSpan::zero());
+        }
+    } else if line.contains("Save Talos Progress: delayed request") {
+        // Resuming the game time on intro cutscene finish.
+        let mut timer = timer.write();
+        if timer.current_phase() == TimerPhase::Running &&
+            timer.current_time().game_time.unwrap() == TimeSpan::zero()
+        {
+            timer.unpause_game_time();
+        }
+    } else if line.contains("Stopping simulation (duration: ") {
+        // Resetting.
         let mut timer = timer.write();
         timer.reset(true);
-
-        // Save the splits.
         save_splits(&timer)?;
 
         state.current_world = None;
-    } else if let Some(current_world) = state.current_world.as_ref() {
-        // Handle autostop.
-        if current_world == "Content/Talos/Levels/Islands_03.wld" && USER.is_match(line) {
+    } else if line.contains("USER:") {
+        // Splitting on game end.
+        if state.current_world
+                .as_ref()
+                .map(|world| world == "Content/Talos/Levels/Islands_03.wld")
+                .unwrap_or(false)
+        {
             let mut timer = timer.write();
             if timer.current_phase() == TimerPhase::Running {
                 timer.split();

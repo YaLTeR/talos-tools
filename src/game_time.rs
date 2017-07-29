@@ -102,10 +102,19 @@ impl GameTime {
 }
 
 fn get_talos_pid() -> Option<Pid> {
-    get_process_list()
-        .iter()
-        .find(|&(_, v)| v.ends_with("Talos"))
-        .map(|(&k, _)| k)
+    let mut iter = get_process_list()
+        .into_iter()
+        .filter(|&(_, ref v)| v.ends_with("/x64/Talos"));
+
+    if let Some((pid, _)) = iter.next() {
+        if iter.next().is_some() {
+            None
+        } else {
+            Some(pid)
+        }
+    } else {
+        None
+    }
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]

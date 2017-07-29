@@ -1,3 +1,4 @@
+extern crate chrono;
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
@@ -6,22 +7,28 @@ extern crate libc;
 extern crate livesplit_core;
 extern crate notify;
 extern crate pancurses;
+extern crate read_process_memory;
 extern crate regex;
+extern crate timer as timer_crate;
 
+#[cfg(all(not(windows), not(target_os = "macos")))]
+extern crate procps_sys;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 extern crate x11;
 
 use std::env;
 
 use error_chain::ChainedError;
-
 mod errors {
     error_chain!{}
 }
 
+mod game_time;
+mod process_list;
+mod timer;
+
 #[cfg(all(not(windows), not(target_os = "macos")))]
 mod center_mouse;
-mod timer;
 
 fn usage() {
     println!("Usage: {} <path/to/Talos.log> <path/to/splits.lss>",

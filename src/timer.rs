@@ -5,10 +5,11 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::Duration;
+use std::thread::JoinHandle;
 
 use errors::*;
-use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, TimingMethod, component,
-                     parser, saver};
+use game_time::GameTime;
+use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, component, parser, saver};
 use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
 use pancurses;
 use regex::Regex;
@@ -19,12 +20,14 @@ enum ArgumentPosition {
 }
 
 struct GameState {
+    game_time: GameTime,
     current_world: Option<String>,
 }
 
 impl GameState {
     fn new() -> Self {
         Self {
+            game_time: GameTime::new(),
             current_world: None,
         }
     }
@@ -51,19 +54,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
             Regex::new(r#"Puzzle "[^"]+" solved"#).unwrap();
     }
 
-    if line.contains("Changing to") || line.contains("Stopping world") {
-        // Game time pausing.
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running {
-            timer.pause_game_time();
-        }
-    } else if line.contains("Player profile saved") || line.contains("Starting Talos simulation") {
-        // Game time unpausing.
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running {
-            timer.unpause_game_time();
-        }
-    } else if let Some(caps) = CHANGING_OVER_TO.captures(line) {
+    if let Some(caps) = CHANGING_OVER_TO.captures(line) {
         // Splitting on returning to Nexus.
         let world_name = caps.get(1).unwrap().as_str();
         if world_name == "Content/Talos/Levels/Nexus.wld" {
@@ -90,17 +81,20 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         }
     } else if line.contains("Started simulation on 'Content/Talos/Levels/Cloud_1_01.wld'") {
         // Starting the timer.
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::NotRunning {
-            timer.split();
-            timer.initialize_game_time();
-            timer.pause_game_time();
-            timer.set_game_time(TimeSpan::zero());
+        let mut timer_ = timer.write();
+        if timer_.current_phase() == TimerPhase::NotRunning {
+            timer_.split();
+
+            // Try starting the game time.
+            drop(timer_);
+            state.game_time.start(timer.clone());
         }
+
+        state.current_world = Some("Content/Talos/Levels/Cloud_1_01.wld".to_string());
     } else if line.contains("Save Talos Progress: delayed request") {
         // Resuming the game time on intro cutscene finish.
         let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running &&
+        if timer.current_phase() == TimerPhase::Running && timer.is_game_time_initialized() &&
             timer.current_time().game_time.unwrap() == TimeSpan::zero()
         {
             timer.unpause_game_time();
@@ -197,10 +191,7 @@ fn create_timer() -> Result<Timer> {
     let run = parser::livesplit::parse(splits, None)
         .chain_err(|| "could not parse the splits file")?;
 
-    let mut timer = Timer::new(run);
-    timer.set_current_timing_method(TimingMethod::GameTime);
-
-    Ok(timer)
+    Ok(Timer::new(run))
 }
 
 fn init_curses_colors() {
@@ -297,7 +288,8 @@ fn draw_sum_of_best(window: &pancurses::Window,
 
 fn main_loop(timer: SharedTimer,
              window: &pancurses::Window,
-             watch_to_main_rx: Receiver<Error>)
+             watch_to_main_rx: Receiver<Error>,
+             watch_thread: JoinHandle<()>)
              -> Result<()> {
     let mut title_component = component::title::Component::new();
     let timer_component = component::timer::Component::new();
@@ -314,7 +306,12 @@ fn main_loop(timer: SharedTimer,
     loop {
         match watch_to_main_rx.try_recv() {
             Ok(e) => return Err(e),
-            Err(TryRecvError::Disconnected) => panic!("watch thread channel disconnected"),
+            Err(TryRecvError::Disconnected) => {
+                bail!("watch thread channel disconnected: {:?}",
+                      watch_thread.join()
+                                  .err()
+                                  .and_then(|x| x.downcast_ref::<String>().cloned()))
+            }
             Err(TryRecvError::Empty) => {}
         }
 
@@ -375,10 +372,10 @@ pub fn run() -> Result<()> {
     let (watch_to_main_tx, watch_to_main_rx) = channel();
 
     let timer = create_timer()?.into_shared();
-    {
+    let watch_thread = {
         let timer = timer.clone();
-        thread::spawn(move || watch_log_thread(watch_to_main_tx, timer));
-    }
+        thread::spawn(move || watch_log_thread(watch_to_main_tx, timer))
+    };
 
     let window = pancurses::initscr();
     window.nodelay(true);
@@ -388,7 +385,7 @@ pub fn run() -> Result<()> {
     pancurses::use_default_colors();
     init_curses_colors();
 
-    let result = main_loop(timer, &window, watch_to_main_rx);
+    let result = main_loop(timer, &window, watch_to_main_rx, watch_thread);
 
     pancurses::endwin();
 

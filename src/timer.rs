@@ -3,14 +3,16 @@ use std::borrow::Cow;
 use std::cmp::{max, min};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::Duration;
 use std::thread::JoinHandle;
 
 use errors::*;
 use game_time::GameTime;
-use livesplit_core::{Color, SharedTimer, TimeSpan, Timer, TimerPhase, component, parser, saver};
-use notify::{RawEvent, RecursiveMode, Watcher, op, raw_watcher};
+use livesplit_core::{component, GeneralLayoutSettings, SharedTimer, TimeSpan, Timer, TimerPhase};
+use livesplit_core::run::{parser, saver};
+use livesplit_core::settings::SemanticColor;
+use notify::{op, raw_watcher, RawEvent, RecursiveMode, Watcher};
 use pancurses;
 use regex::Regex;
 
@@ -34,9 +36,8 @@ impl GameState {
 }
 
 fn save_splits(timer: &Timer) -> Result<()> {
-    let splits_filename = env::args()
-        .nth(ArgumentPosition::SplitsFilename as usize)
-        .ok_or("the splits filename argument is missing")?;
+    let splits_filename = env::args().nth(ArgumentPosition::SplitsFilename as usize)
+                                     .ok_or("the splits filename argument is missing")?;
 
     saver::livesplit::save(timer.run(),
                            File::create(splits_filename)
@@ -69,21 +70,15 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         state.current_world = Some(world_name.to_string());
     } else if line.contains("Picked:") {
         // Splitting on tetromino and star pickups.
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running {
-            timer.split();
-        }
+        timer.write().split();
     } else if PUZZLE_SOLVED.is_match(line) {
         // Splitting on tetromino puzzles.
-        let mut timer = timer.write();
-        if timer.current_phase() == TimerPhase::Running {
-            timer.split();
-        }
+        timer.write().split();
     } else if line.contains("Started simulation on 'Content/Talos/Levels/Cloud_1_01.wld'") {
         // Starting the timer.
         let mut timer_ = timer.write();
         if timer_.current_phase() == TimerPhase::NotRunning {
-            timer_.split();
+            timer_.start();
 
             // Try starting the game time.
             drop(timer_);
@@ -113,10 +108,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
                 .map(|world| world == "Content/Talos/Levels/Islands_03.wld")
                 .unwrap_or(false)
         {
-            let mut timer = timer.write();
-            if timer.current_phase() == TimerPhase::Running {
-                timer.split();
-            }
+            timer.write().split();
         }
     }
 
@@ -124,16 +116,14 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
 }
 
 fn watch_log(timer: SharedTimer) -> Result<()> {
-    let log_filename = env::args()
-        .nth(ArgumentPosition::TalosLogFilename as usize)
-        .ok_or("the log filename argument is missing")?;
-    let log = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&log_filename)
-        .chain_err(|| "could not open the Talos log file")?;
+    let log_filename = env::args().nth(ArgumentPosition::TalosLogFilename as usize)
+                                  .ok_or("the log filename argument is missing")?;
+    let log = OpenOptions::new().read(true)
+                                .write(true)
+                                .create(true)
+                                .truncate(true)
+                                .open(&log_filename)
+                                .chain_err(|| "could not open the Talos log file")?;
     let mut log = BufReader::new(log);
     let mut line = String::new();
     {
@@ -143,8 +133,7 @@ fn watch_log(timer: SharedTimer) -> Result<()> {
     }
 
     let (tx, rx) = channel();
-    let mut watcher = raw_watcher(tx)
-        .chain_err(|| "could not create a filesystem watcher")?;
+    let mut watcher = raw_watcher(tx).chain_err(|| "could not create a filesystem watcher")?;
     watcher.watch(&log_filename, RecursiveMode::NonRecursive)
            .chain_err(|| "could not set up the filesystem watcher on the Talos log file")?;
 
@@ -183,27 +172,37 @@ fn watch_log_thread(watch_to_main_tx: Sender<Error>, timer: SharedTimer) {
 }
 
 fn create_timer() -> Result<Timer> {
-    let splits_filename = env::args()
-        .nth(ArgumentPosition::SplitsFilename as usize)
-        .ok_or("the splits filename argument is missing")?;
-    let splits = File::open(splits_filename)
-        .chain_err(|| "could not open the splits file")?;
-    let run = parser::livesplit::parse(splits, None)
-        .chain_err(|| "could not parse the splits file")?;
+    let splits_filename = env::args().nth(ArgumentPosition::SplitsFilename as usize)
+                                     .ok_or("the splits filename argument is missing")?;
+    let splits = File::open(splits_filename).chain_err(|| "could not open the splits file")?;
+    let run =
+        parser::livesplit::parse(splits, None).chain_err(|| "could not parse the splits file")?;
 
-    Ok(Timer::new(run))
+    Timer::new(run).chain_err(|| "could not create the Timer")
 }
 
 fn init_curses_colors() {
-    pancurses::init_pair(Color::Default as i16, -1, -1);
-    pancurses::init_pair(Color::AheadGainingTime as i16, pancurses::COLOR_GREEN, -1);
-    pancurses::init_pair(Color::AheadLosingTime as i16, pancurses::COLOR_GREEN, -1);
-    pancurses::init_pair(Color::BehindGainingTime as i16, pancurses::COLOR_RED, -1);
-    pancurses::init_pair(Color::BehindLosingTime as i16, pancurses::COLOR_RED, -1);
-    pancurses::init_pair(Color::BestSegment as i16, pancurses::COLOR_YELLOW, -1);
-    pancurses::init_pair(Color::NotRunning as i16, -1, -1);
-    pancurses::init_pair(Color::Paused as i16, -1, -1);
-    pancurses::init_pair(Color::PersonalBest as i16, pancurses::COLOR_BLUE, -1);
+    pancurses::init_pair(SemanticColor::Default as i16, -1, -1);
+    pancurses::init_pair(SemanticColor::AheadGainingTime as i16,
+                         pancurses::COLOR_GREEN,
+                         -1);
+    pancurses::init_pair(SemanticColor::AheadLosingTime as i16,
+                         pancurses::COLOR_GREEN,
+                         -1);
+    pancurses::init_pair(SemanticColor::BehindGainingTime as i16,
+                         pancurses::COLOR_RED,
+                         -1);
+    pancurses::init_pair(SemanticColor::BehindLosingTime as i16,
+                         pancurses::COLOR_RED,
+                         -1);
+    pancurses::init_pair(SemanticColor::BestSegment as i16,
+                         pancurses::COLOR_YELLOW,
+                         -1);
+    pancurses::init_pair(SemanticColor::NotRunning as i16, -1, -1);
+    pancurses::init_pair(SemanticColor::Paused as i16, -1, -1);
+    pancurses::init_pair(SemanticColor::PersonalBest as i16,
+                         pancurses::COLOR_BLUE,
+                         -1);
 }
 
 fn truncate_string(string: &str, length: usize) -> Cow<str> {
@@ -219,10 +218,10 @@ fn truncate_string(string: &str, length: usize) -> Cow<str> {
 }
 
 fn draw_title(window: &pancurses::Window, width: usize, title_state: component::title::State) {
-    window.color_set(Color::Default as i16);
-    window.printw(&format!("{:^1$.1$}", title_state.game, width));
-    window.printw(&format!("{:^1$.1$}", title_state.category, width));
-    let attempts = format!("{}", title_state.attempts);
+    window.color_set(SemanticColor::Default as i16);
+    window.printw(&format!("{:^1$.1$}", title_state.line1, width));
+    window.printw(&format!("{:^1$.1$}", title_state.line2.unwrap(), width));
+    let attempts = format!("{}", title_state.attempts.unwrap());
     window.mv(1, (width - attempts.len()) as i32);
     window.printw(&attempts);
 }
@@ -233,13 +232,13 @@ fn draw_split(window: &pancurses::Window, width: usize, split: &component::split
     let split_name_width = width - TIME_WIDTH * 2 - 2;
 
     let split_name_truncated = truncate_string(&split.name, split_name_width);
-    window.color_set(Color::Default as i16);
+    window.color_set(SemanticColor::Default as i16);
     window.printw(&format!("{:1$.1$} ", split_name_truncated, split_name_width));
 
-    window.color_set(split.color as i16);
+    window.color_set(split.semantic_color as i16);
     window.printw(&format!("{:>1$.1$} ", split.delta, TIME_WIDTH));
 
-    window.color_set(Color::Default as i16);
+    window.color_set(SemanticColor::Default as i16);
     window.printw(&format!("{:>1$.1$}", split.time, TIME_WIDTH));
 }
 
@@ -248,7 +247,7 @@ fn draw_splits(window: &pancurses::Window, width: usize, splits_state: component
         draw_split(window, width, split);
     }
 
-    window.color_set(Color::Default as i16);
+    window.color_set(SemanticColor::Default as i16);
     window.printw(&format!("{:-<1$}", "", width));
 
     draw_split(window,
@@ -257,7 +256,7 @@ fn draw_splits(window: &pancurses::Window, width: usize, splits_state: component
 }
 
 fn draw_timer(window: &pancurses::Window, width: usize, timer_state: component::timer::State) {
-    window.color_set(timer_state.color as i16);
+    window.color_set(timer_state.semantic_color as i16);
     window.printw(&format!("{:^1$.1$}",
                            &format!("{}{}", timer_state.time, timer_state.fraction),
                            width));
@@ -266,10 +265,10 @@ fn draw_timer(window: &pancurses::Window, width: usize, timer_state: component::
 fn draw_prev_segment(window: &pancurses::Window,
                      width: usize,
                      prev_seg_state: component::previous_segment::State) {
-    window.color_set(Color::Default as i16);
+    window.color_set(SemanticColor::Default as i16);
     window.printw(&prev_seg_state.text);
 
-    window.color_set(prev_seg_state.color as i16);
+    window.color_set(prev_seg_state.semantic_color as i16);
     window.printw(&format!("{:>1$.1$}",
                            &prev_seg_state.time,
                            width - min(width, window.get_cur_x() as usize)));
@@ -280,7 +279,7 @@ fn draw_sum_of_best(window: &pancurses::Window,
                     sob_state: component::sum_of_best::State) {
     let y = window.get_cur_y();
 
-    window.color_set(Color::Default as i16);
+    window.color_set(SemanticColor::Default as i16);
     window.printw("Sum of Best");
     window.mv(y, (width - sob_state.time.len()) as i32);
     window.printw(&sob_state.time);
@@ -333,10 +332,10 @@ fn main_loop(timer: SharedTimer,
 
         let timer = timer.read();
         let title_state = title_component.state(&timer);
-        let timer_state = timer_component.state(&timer);
-        let splits_state = splits_component.state(&timer);
+        let timer_state = timer_component.state(&timer, &GeneralLayoutSettings::default());
+        let splits_state = splits_component.state(&timer, &GeneralLayoutSettings::default());
         let sob_state = sob_component.state(&timer);
-        let prev_seg_state = prev_seg_component.state(&timer);
+        let prev_seg_state = prev_seg_component.state(&timer, &GeneralLayoutSettings::default());
         drop(timer);
 
         let width = window.get_max_x() as usize;

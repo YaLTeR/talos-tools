@@ -1,6 +1,6 @@
 [package]
 name = "talos-tools"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Ivan Molodetskikh <yalterz@gmail.com>"]
 
 [dependencies]
@@ -8,13 +8,13 @@ chrono = "0.2"
 error-chain = "0.10"
 lazy_static = "0.2"
 libc = "0.2"
-livesplit-core = "0.6"
+livesplit-core = "0.7"
 notify = "4"
-pancurses = "0.8"
+pancurses = "0.9"
 read-process-memory = "0.1"
 regex = "0.2"
 timer = "0.1"
 
 [target.'cfg(all(not(windows), not(target_os = "macos")))'.dependencies]
 procps-sys = "0.1"
-x11 = { version = "2.14", features = [ "xlib" ] }
+x11 = { version = "2.15", features = [ "xlib" ] }

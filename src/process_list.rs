@@ -4,7 +4,7 @@ use std::os::raw::c_int;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub fn get_process_list() -> HashMap<c_int, String> {
     use std::ffi::CStr;
-    use procps_sys::readproc::{PROC_FILLCOM, closeproc, openproc, proc_t, readproc};
+    use procps_sys::readproc::{closeproc, openproc, proc_t, readproc, PROC_FILLCOM};
 
     let mut rv = HashMap::new();
 

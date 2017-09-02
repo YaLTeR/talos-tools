@@ -102,9 +102,8 @@ impl GameTime {
 }
 
 fn get_talos_pid() -> Option<Pid> {
-    let mut iter = get_process_list()
-        .into_iter()
-        .filter(|&(_, ref v)| v.ends_with("/x64/Talos"));
+    let mut iter = get_process_list().into_iter()
+                                     .filter(|&(_, ref v)| v.ends_with("/x64/Talos"));
 
     if let Some((pid, _)) = iter.next() {
         if iter.next().is_some() {

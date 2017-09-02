@@ -126,6 +126,15 @@ fn process_line(config: &Config,
         save_splits(&timer)?;
 
         state.current_world = None;
+    } else if line.contains("USER: /eternalize") || line.contains("USER: /transcend") {
+        // Splitting on game end.
+        if state.current_world
+                .as_ref()
+                .map(|world| world == "Content/Talos/Levels/Nexus.wld")
+                .unwrap_or(false)
+        {
+            timer.write().split();
+        }
     } else if line.contains("USER:") {
         // Splitting on game end.
         if state.current_world

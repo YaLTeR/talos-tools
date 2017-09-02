@@ -3,11 +3,13 @@ use std::borrow::Cow;
 use std::cmp::{max, min};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
+use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::Duration;
 use std::thread::JoinHandle;
 
 use errors::*;
+use config::*;
 use game_time::GameTime;
 use livesplit_core::{component, GeneralLayoutSettings, SharedTimer, TimeSpan, Timer, TimerPhase};
 use livesplit_core::run::{parser, saver};
@@ -47,7 +49,11 @@ fn save_splits(timer: &Timer) -> Result<()> {
     Ok(())
 }
 
-fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Result<()> {
+fn process_line(config: &Config,
+                timer: &SharedTimer,
+                state: &mut GameState,
+                line: &str)
+                -> Result<()> {
     lazy_static! {
         static ref CHANGING_OVER_TO: Regex =
             Regex::new(r"Changing over to (.+)").unwrap();
@@ -58,7 +64,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
     if let Some(caps) = CHANGING_OVER_TO.captures(line) {
         // Splitting on returning to Nexus.
         let world_name = caps.get(1).unwrap().as_str();
-        if world_name == "Content/Talos/Levels/Nexus.wld" {
+        if config.split_on_return_to_nexus && world_name == "Content/Talos/Levels/Nexus.wld" {
             let mut timer = timer.write();
             if timer.current_phase() == TimerPhase::Running {
                 if state.current_world.as_ref().unwrap() != world_name {
@@ -70,10 +76,29 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
         state.current_world = Some(world_name.to_string());
     } else if line.contains("Picked:") {
         // Splitting on tetromino and star pickups.
-        timer.write().split();
+        if config.split_on_sigil_collection.in_general {
+            let world_name = state.current_world.as_ref().unwrap();
+
+            let mut split = true;
+            if world_name == "Content/Talos/Levels/Cloud_1_06.wld" {
+                if !config.split_on_sigil_collection.in_a6 {
+                    split = false;
+                }
+            } else if world_name == "Content/Talos/Levels/Cloud_2_04.wld" {
+                if !config.split_on_sigil_collection.in_b4 {
+                    split = false;
+                }
+            }
+
+            if split {
+                timer.write().split();
+            }
+        }
     } else if PUZZLE_SOLVED.is_match(line) {
         // Splitting on tetromino puzzles.
-        timer.write().split();
+        if config.split_on_tetromino_doors {
+            timer.write().split();
+        }
     } else if line.contains("Started simulation on 'Content/Talos/Levels/Cloud_1_01.wld'") {
         // Starting the timer.
         let mut timer_ = timer.write();
@@ -115,7 +140,7 @@ fn process_line(timer: &SharedTimer, state: &mut GameState, line: &str) -> Resul
     Ok(())
 }
 
-fn watch_log(timer: SharedTimer) -> Result<()> {
+fn watch_log(config: &Config, timer: SharedTimer) -> Result<()> {
     let log_filename = env::args().nth(ArgumentPosition::TalosLogFilename as usize)
                                   .ok_or("the log filename argument is missing")?;
     let log = OpenOptions::new().read(true)
@@ -155,7 +180,7 @@ fn watch_log(timer: SharedTimer) -> Result<()> {
                         break;
                     }
 
-                    process_line(&timer, &mut state, &line)?;
+                    process_line(config, &timer, &mut state, &line)?;
                 }
             }
             _ => {
@@ -165,8 +190,8 @@ fn watch_log(timer: SharedTimer) -> Result<()> {
     }
 }
 
-fn watch_log_thread(watch_to_main_tx: Sender<Error>, timer: SharedTimer) {
-    if let Err(e) = watch_log(timer) {
+fn watch_log_thread(watch_to_main_tx: Sender<Error>, config: Arc<Config>, timer: SharedTimer) {
+    if let Err(e) = watch_log(&config, timer) {
         watch_to_main_tx.send(e).unwrap();
     }
 }
@@ -368,12 +393,16 @@ fn main_loop(timer: SharedTimer,
 }
 
 pub fn run() -> Result<()> {
+    let config = read_config().chain_err(|| "failed to read config")
+                              .map(Arc::new)?;
+
     let (watch_to_main_tx, watch_to_main_rx) = channel();
 
     let timer = create_timer()?.into_shared();
     let watch_thread = {
+        let config = config.clone();
         let timer = timer.clone();
-        thread::spawn(move || watch_log_thread(watch_to_main_tx, timer))
+        thread::spawn(move || watch_log_thread(watch_to_main_tx, config, timer))
     };
 
     let window = pancurses::initscr();

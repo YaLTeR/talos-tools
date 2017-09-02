@@ -1,0 +1,7 @@
+split_on_return_to_nexus: true
+split_on_tetromino_doors: true
+split_on_item_unlocks: true
+split_on_sigil_collection:
+  in_general: true
+  in_a6: false
+  in_b4: true

@@ -9,6 +9,10 @@ extern crate notify;
 extern crate pancurses;
 extern crate read_process_memory;
 extern crate regex;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_yaml;
 extern crate timer as timer_crate;
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -23,6 +27,7 @@ mod errors {
     error_chain!{}
 }
 
+mod config;
 mod game_time;
 mod process_list;
 mod timer;

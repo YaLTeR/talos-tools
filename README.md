@@ -10,6 +10,8 @@ Get Rust and do `cargo run --release`.
 
 For the timer to work, prepare the splits file in LiveSplit `.lss` format, and run the program like this: `cargo run --release <path/to/Talos.log> <path/to/splits.lss>`.
 
+Check the `config.yaml` file for autosplitter configuration.
+
 The load removal is currently supported only on **64-bit Linux Talos**, and requires elevated permissions for reading memory of the Talos process. Run `cargo build --release`, followed by `sudo target/release/talos-tools <path/to/Talos.log> <path/to/splits.lss>`. If the load removal fails to work the timer will fall back to RTA timing.
 
 ### Usage

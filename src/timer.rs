@@ -330,7 +330,7 @@ fn main_loop(timer: SharedTimer,
     let prev_seg_component = component::previous_segment::Component::new();
     let mut splits_component = component::splits::Component::new();
     {
-        let mut settings = splits_component.settings_mut();
+        let settings = splits_component.settings_mut();
         settings.always_show_last_split = true;
         settings.separator_last_split = true;
         settings.split_preview_count = 1;

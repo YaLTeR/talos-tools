@@ -118,8 +118,10 @@ fn get_talos_pid() -> Option<Pid> {
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
 fn is_loading(process: &ProcessHandle) -> Option<bool> {
-    const LOADING_POPUP_PTR: u64 = 0x2B2CAC0;
-    const LOADING_WORLD_PTR: u64 = 0x2B961C0;
+    // const LOADING_POPUP_PTR: u64 = 0x2B2CAC0;
+    // const LOADING_WORLD_PTR: u64 = 0x2B961C0;
+    const LOADING_POPUP_PTR: u64 = 0x2C82BA0;
+    const LOADING_WORLD_PTR: u64 = 0x2CEC320;
     const OFF: u64 = 0x58;
 
     let mut buf = [0u8; 8];
